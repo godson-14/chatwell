@@ -31,6 +31,7 @@ const newRoomInput = document.getElementById('newRoomInput');
 const createRoomError = document.getElementById('createRoomError');
 const logoutButton = document.getElementById('logoutButton');
 const inviteButton = document.getElementById('inviteButton');
+const groupInviteButton = document.getElementById('groupInviteButton');
 const currentRoomName = document.getElementById('currentRoomName');
 
 let currentUser = null;
@@ -231,6 +232,15 @@ inviteButton.addEventListener('click', () => {
     return;
   }
   socket.emit('invite-private', { targets: cleaned });
+});
+
+groupInviteButton.addEventListener('click', () => {
+  if (!currentRoom || currentRoom === 'Lobby') {
+    setStatus('You must be in a room with others to send a group invite.');
+    return;
+  }
+  socket.emit('group-invite');
+  setStatus(`Group invite sent for room ${currentRoom}.`);
 });
 
 messageForm.addEventListener('submit', (event) => {

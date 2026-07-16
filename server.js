@@ -252,6 +252,34 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('group-invite', () => {
+    if (!username) return;
+    const currentRoom = userRooms.get(username) || 'Lobby';
+    const members = Array.from(roomMembers.get(currentRoom) || []).filter((u) => u !== username);
+    if (members.length === 0) {
+      socket.emit('invite-error', 'No other members are present to invite.');
+      return;
+    }
+
+    const participants = [username, ...members].sort();
+    const privateRoom = `private-${participants.join('-')}-${Date.now()}`;
+    ensureRoom(privateRoom);
+    saveHistory();
+    broadcastRooms();
+    joinRoom(socket, username, privateRoom);
+
+    members.forEach((target) => {
+      const targetId = users.get(target);
+      if (targetId) {
+        io.to(targetId).emit('private-room-invite', {
+          room: privateRoom,
+          from: username,
+          participants,
+        });
+      }
+    });
+  });
+
   socket.on('accept-private-room', (roomName) => {
     if (!username) return;
     const cleanRoom = String(roomName || '').trim();
