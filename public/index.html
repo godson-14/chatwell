@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat App with Voice Notes</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="overlay" id="loginOverlay">
+    <div class="login-card">
+      <h1>Welcome</h1>
+      <div class="auth-switch">
+        <button id="showLoginBtn" type="button" class="auth-tab active">Login</button>
+        <button id="showRegisterBtn" type="button" class="auth-tab">Register</button>
+      </div>
+      <form id="loginForm" class="auth-form">
+        <input id="usernameInput" placeholder="Username" autocomplete="off" />
+        <input id="passwordInput" type="password" placeholder="Password" autocomplete="new-password" />
+        <button type="submit">Login</button>
+      </form>
+      <form id="registerForm" class="auth-form hidden">
+        <input id="registerUsernameInput" placeholder="Username" autocomplete="off" />
+        <input id="registerPasswordInput" type="password" placeholder="Password" autocomplete="new-password" />
+        <input id="registerConfirmInput" type="password" placeholder="Confirm password" autocomplete="new-password" />
+        <button type="submit">Register</button>
+      </form>
+      <div id="loginError" class="error"></div>
+    </div>
+  </div>
+
+  <main class="app hidden" id="chatApp">
+    <section class="sidebar">
+      <div class="sidebar-section">
+        <h2>Rooms</h2>
+        <div id="roomsList" class="rooms-list"></div>
+        <form id="createRoomForm" class="create-room-form">
+          <input id="newRoomInput" placeholder="New room name" autocomplete="off" />
+          <button type="submit">Create</button>
+        </form>
+        <div id="createRoomError" class="error"></div>
+      </div>
+
+      <div class="sidebar-section">
+        <h2>Invite</h2>
+        <button id="logoutButton" class="voice-button">Logout</button>
+        <button id="inviteButton" class="voice-button">Invite to private room</button>
+      </div>
+
+      <div class="sidebar-section">
+        <h2>Users</h2>
+        <div id="usersList" class="users-list"></div>
+        <div class="select-row">
+          <label for="recipientSelect">Send to</label>
+          <select id="recipientSelect">
+            <option value="All">All</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="info-box" id="statusBox">Connecting...</div>
+    </section>
+
+    <section class="chat-panel">
+      <header class="chat-header">
+        <h2>Chat <span id="currentRoomName">(Lobby)</span></h2>
+      </header>
+      <div id="messages" class="messages"></div>
+
+      <form id="messageForm" class="message-form">
+        <input id="messageInput" placeholder="Type a message" autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+      <button id="voiceButton" class="voice-button">Record voice note</button>
+      <div id="recordingIndicator" class="recording hidden">Recording... press again to stop</div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
