@@ -211,23 +211,44 @@ io.on('connection', (socket) => {
     joinRoom(socket, username, cleanRoom);
   });
 
-  socket.on('invite-private', (targetName) => {
+  socket.on('invite-private', ({ targets }) => {
     if (!username) return;
-    const cleanTarget = String(targetName || '').trim();
-    if (!cleanTarget || cleanTarget === username) return;
-    const targetId = users.get(cleanTarget);
-    if (!targetId) {
-      socket.emit('invite-error', 'User is not online.');
+    if (!Array.isArray(targets) || targets.length === 0) {
+      socket.emit('invite-error', 'No users provided for the invite.');
       return;
     }
-    const privateRoom = `private-${username}-${cleanTarget}-${Date.now()}`;
+
+    const cleanTargets = targets
+      .map((name) => String(name || '').trim())
+      .filter((name) => name && name !== username);
+
+    if (cleanTargets.length === 0) {
+      socket.emit('invite-error', 'No valid usernames provided.');
+      return;
+    }
+
+    const onlineTargets = cleanTargets
+      .filter((target) => users.has(target));
+
+    if (onlineTargets.length === 0) {
+      socket.emit('invite-error', 'None of the invited users are online.');
+      return;
+    }
+
+    const participants = [username, ...onlineTargets].sort();
+    const privateRoom = `private-${participants.join('-')}-${Date.now()}`;
     ensureRoom(privateRoom);
     saveHistory();
     broadcastRooms();
     joinRoom(socket, username, privateRoom);
-    io.to(targetId).emit('private-room-invite', {
-      room: privateRoom,
-      from: username,
+
+    onlineTargets.forEach((target) => {
+      const targetId = users.get(target);
+      io.to(targetId).emit('private-room-invite', {
+        room: privateRoom,
+        from: username,
+        participants,
+      });
     });
   });
 

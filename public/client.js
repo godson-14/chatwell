@@ -125,7 +125,7 @@ function renderNotifications() {
     const card = document.createElement('div');
     card.className = 'notification-card';
     const text = document.createElement('p');
-    text.textContent = `${invite.from} invited you to join room ${invite.room}.`;
+    text.textContent = `${invite.from} invited you to join room ${invite.room}. Participants: ${invite.participants.join(', ')}.`;
     const actions = document.createElement('div');
     actions.className = 'notification-actions';
     const acceptButton = document.createElement('button');
@@ -220,9 +220,17 @@ logoutButton.addEventListener('click', () => {
 });
 
 inviteButton.addEventListener('click', () => {
-  const target = prompt('Enter the username to invite for a private room:');
-  if (!target) return;
-  socket.emit('invite-private', target.trim());
+  const targets = prompt('Enter usernames to invite for a private room, separated by commas:');
+  if (!targets) return;
+  const cleaned = targets
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name && name !== currentUser);
+  if (!cleaned.length) {
+    setStatus('No valid usernames entered.');
+    return;
+  }
+  socket.emit('invite-private', { targets: cleaned });
 });
 
 messageForm.addEventListener('submit', (event) => {
@@ -303,8 +311,8 @@ socket.on('invite-error', (message) => {
   setStatus(message);
 });
 
-socket.on('private-room-invite', ({ room, from }) => {
-  pendingInvites.push({ room, from });
+socket.on('private-room-invite', ({ room, from, participants }) => {
+  pendingInvites.push({ room, from, participants });
   renderNotifications();
   setStatus(`${from} invited you to private room ${room}.`);
 });
