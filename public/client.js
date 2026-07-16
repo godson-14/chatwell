@@ -235,12 +235,17 @@ inviteButton.addEventListener('click', () => {
 });
 
 groupInviteButton.addEventListener('click', () => {
-  if (!currentRoom || currentRoom === 'Lobby') {
-    setStatus('You must be in a room with others to send a group invite.');
+  if (!currentRoom) {
+    setStatus('You must be in a room to send a group invite.');
+    return;
+  }
+  const memberCount = usersList.children.length - 1;
+  if (memberCount <= 0) {
+    setStatus('No other members are in the room to invite.');
     return;
   }
   socket.emit('group-invite');
-  setStatus(`Group invite sent for room ${currentRoom}.`);
+  setStatus(`Group invite sent for room ${currentRoom}. Inviting ${memberCount} member(s).`);
 });
 
 messageForm.addEventListener('submit', (event) => {
@@ -319,6 +324,10 @@ socket.on('create-room-error', (message) => {
 
 socket.on('invite-error', (message) => {
   setStatus(message);
+});
+
+socket.on('invite-success', ({ room, participants }) => {
+  setStatus(`Invite created for ${room}. Participants: ${participants.join(', ')}.`);
 });
 
 socket.on('private-room-invite', ({ room, from, participants }) => {

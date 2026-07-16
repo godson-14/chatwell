@@ -250,6 +250,7 @@ io.on('connection', (socket) => {
         participants,
       });
     });
+    socket.emit('invite-success', { room: privateRoom, participants });
   });
 
   socket.on('group-invite', () => {
@@ -278,6 +279,7 @@ io.on('connection', (socket) => {
         });
       }
     });
+    socket.emit('invite-success', { room: privateRoom, participants });
   });
 
   socket.on('accept-private-room', (roomName) => {
