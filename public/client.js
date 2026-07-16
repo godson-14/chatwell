@@ -25,6 +25,7 @@ const statusBox = document.getElementById('statusBox');
 const voiceButton = document.getElementById('voiceButton');
 const recordingIndicator = document.getElementById('recordingIndicator');
 const roomsList = document.getElementById('roomsList');
+const notificationsList = document.getElementById('notificationsList');
 const createRoomForm = document.getElementById('createRoomForm');
 const newRoomInput = document.getElementById('newRoomInput');
 const createRoomError = document.getElementById('createRoomError');
@@ -35,6 +36,7 @@ const currentRoomName = document.getElementById('currentRoomName');
 let currentUser = null;
 let currentRoom = 'Lobby';
 let currentRooms = [];
+let pendingInvites = [];
 let mediaRecorder = null;
 let recordedChunks = [];
 let isRecording = false;
@@ -114,6 +116,40 @@ function updateRooms(rooms) {
       }
     });
     roomsList.appendChild(roomButton);
+  });
+}
+
+function renderNotifications() {
+  notificationsList.innerHTML = '';
+  pendingInvites.forEach((invite, index) => {
+    const card = document.createElement('div');
+    card.className = 'notification-card';
+    const text = document.createElement('p');
+    text.textContent = `${invite.from} invited you to join room ${invite.room}.`;
+    const actions = document.createElement('div');
+    actions.className = 'notification-actions';
+    const acceptButton = document.createElement('button');
+    acceptButton.type = 'button';
+    acceptButton.className = 'accept';
+    acceptButton.textContent = 'Accept';
+    acceptButton.addEventListener('click', () => {
+      socket.emit('accept-private-room', invite.room);
+      pendingInvites.splice(index, 1);
+      renderNotifications();
+    });
+    const declineButton = document.createElement('button');
+    declineButton.type = 'button';
+    declineButton.className = 'decline';
+    declineButton.textContent = 'Decline';
+    declineButton.addEventListener('click', () => {
+      pendingInvites.splice(index, 1);
+      renderNotifications();
+    });
+    actions.appendChild(acceptButton);
+    actions.appendChild(declineButton);
+    card.appendChild(text);
+    card.appendChild(actions);
+    notificationsList.appendChild(card);
   });
 }
 
@@ -268,10 +304,9 @@ socket.on('invite-error', (message) => {
 });
 
 socket.on('private-room-invite', ({ room, from }) => {
-  const accept = confirm(`${from} invited you to a private room. Accept?`);
-  if (accept) {
-    socket.emit('accept-private-room', room);
-  }
+  pendingInvites.push({ room, from });
+  renderNotifications();
+  setStatus(`${from} invited you to private room ${room}.`);
 });
 
 socket.on('logged-out', () => {
