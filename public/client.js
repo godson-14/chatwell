@@ -1,4 +1,9 @@
-const socket = io();
+// Allow connecting to an external socket server by setting
+// `window.SOCKET_SERVER_URL` in the page (optional). Falls back to same origin.
+const SOCKET_SERVER_URL = (typeof window !== 'undefined' && window.SOCKET_SERVER_URL)
+  ? window.SOCKET_SERVER_URL
+  : (location.protocol + '//' + location.hostname + (location.port ? ':' + location.port : ''));
+const socket = io(SOCKET_SERVER_URL);
 const loginOverlay = document.getElementById('loginOverlay');
 const loginForm = document.getElementById('loginForm');
 const usernameInput = document.getElementById('usernameInput');
