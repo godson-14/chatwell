@@ -522,6 +522,46 @@ io.on('connection', (socket) => {
     io.to(room).emit('room-locked', { room, locked: !locked });
   });
 
+  socket.on('call-offer', ({ to, offer, type }) => {
+    if (!username) return;
+    const targetId = users.get(to);
+    if (targetId) {
+      io.to(targetId).emit('call-offer', { from: username, offer, type });
+    }
+  });
+
+  socket.on('call-answer', ({ to, answer }) => {
+    if (!username) return;
+    const targetId = users.get(to);
+    if (targetId) {
+      io.to(targetId).emit('call-answer', { answer });
+    }
+  });
+
+  socket.on('call-candidate', ({ to, candidate }) => {
+    if (!username) return;
+    const targetId = users.get(to);
+    if (targetId) {
+      io.to(targetId).emit('call-candidate', { candidate });
+    }
+  });
+
+  socket.on('call-decline', ({ to }) => {
+    if (!username) return;
+    const targetId = users.get(to);
+    if (targetId) {
+      io.to(targetId).emit('call-decline');
+    }
+  });
+
+  socket.on('call-end', ({ to }) => {
+    if (!username) return;
+    const targetId = users.get(to);
+    if (targetId) {
+      io.to(targetId).emit('call-end');
+    }
+  });
+
   socket.on('logout', () => {
     cleanupUser(username);
     username = null;

@@ -44,7 +44,23 @@ const soundToggle = document.getElementById('soundToggle');
 const mobileToggle = document.getElementById('mobileToggle');
 const sidebar = document.getElementById('sidebar');
 const clearRoomButton = document.getElementById('clearRoomButton');
+const voiceCallButton = document.getElementById('voiceCallButton');
+const videoCallButton = document.getElementById('videoCallButton');
+const callOverlay = document.getElementById('callOverlay');
+const callStatus = document.getElementById('callStatus');
+const localVideo = document.getElementById('localVideo');
+const remoteVideo = document.getElementById('remoteVideo');
+const acceptCallButton = document.getElementById('acceptCallButton');
+const declineCallButton = document.getElementById('declineCallButton');
+const hangupCallButton = document.getElementById('hangupCallButton');
 const lockRoomButton = document.getElementById('lockRoomButton');
+const muteUserButton = document.getElementById('muteUserButton');
+const banUserButton = document.getElementById('banUserButton');
+const editProfileButton = document.getElementById('editProfileButton');
+const createPollButton = document.getElementById('createPollButton');
+const assistantButton = document.getElementById('assistantButton');
+const profileCard = document.getElementById('profileCard');
+const pinnedMessagesList = document.getElementById('pinnedMessagesList');
 
 let currentUser = null;
 let currentRoom = 'Lobby';
@@ -62,6 +78,15 @@ let unreadRooms = new Set();
 let readReceipts = new Map();
 let currentTheme = localStorage.getItem('chatwell-theme') || 'dark';
 let soundEnabled = true;
+let userProfiles = new Map();
+let pinnedMessages = new Map();
+let moderationState = { muted: new Set(), banned: new Set() };
+let polls = new Map();
+let browserNotificationsEnabled = false;
+let peerConnection = null;
+let localStream = null;
+let callState = { incoming: false, active: false, type: 'voice', caller: null, target: null };
+let pendingOffer = null;
 
 function setStatus(text) {
   statusBox.textContent = text;
@@ -234,8 +259,20 @@ function createMessageElement(message) {
     deleteButton.addEventListener('click', () => {
       socket.emit('delete-message', { id: message.id });
     });
+    const pinButton = document.createElement('button');
+    pinButton.type = 'button';
+    pinButton.textContent = 'Pin';
+    pinButton.addEventListener('click', () => {
+      const entries = pinnedMessages.get(currentRoom) || [];
+      const next = entries.some((entry) => entry.id === message.id)
+        ? entries.filter((entry) => entry.id !== message.id)
+        : [...entries, { id: message.id, from: message.from, text: message.text || 'Shared content' }];
+      pinnedMessages.set(currentRoom, next.slice(-4));
+      renderPinnedMessages();
+    });
     actions.appendChild(editButton);
     actions.appendChild(deleteButton);
+    actions.appendChild(pinButton);
     wrapper.appendChild(actions);
   }
 
@@ -281,6 +318,27 @@ function playSound(name) {
   } catch (error) {
     // Ignore browser audio limitations.
   }
+}
+
+function requestBrowserNotifications() {
+  if (browserNotificationsEnabled || !('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    browserNotificationsEnabled = true;
+    return;
+  }
+  if (Notification.permission !== 'denied') {
+    Notification.requestPermission().then((permission) => {
+      browserNotificationsEnabled = permission === 'granted';
+    });
+  }
+}
+
+function showBrowserNotification(message) {
+  if (!browserNotificationsEnabled || !('Notification' in window) || message.room === currentRoom) return;
+  if (document.visibilityState === 'visible') return;
+  const body = message.text || `${message.type} message`;
+  const notification = new Notification(`${message.from} in ${message.room}`, { body });
+  setTimeout(() => notification.close(), 5000);
 }
 
 function markRoomRead(room) {
@@ -349,6 +407,33 @@ function renderNotifications() {
   });
 }
 
+function updateProfileCard() {
+  const profile = userProfiles.get(currentUser) || { name: currentUser || 'Guest', status: 'Available', mood: 'Chatting' };
+  profileCard.innerHTML = `
+    <div class="profile-badge">${getAvatarInitials(profile.name)}</div>
+    <div>
+      <strong>${profile.name}</strong>
+      <div>${profile.status}</div>
+      <div class="profile-meta">${profile.mood}</div>
+    </div>
+  `;
+}
+
+function renderPinnedMessages() {
+  pinnedMessagesList.innerHTML = '';
+  const entries = pinnedMessages.get(currentRoom) || [];
+  if (!entries.length) {
+    pinnedMessagesList.innerHTML = '<div class="section-note">No pinned messages yet.</div>';
+    return;
+  }
+  entries.forEach((entry) => {
+    const item = document.createElement('div');
+    item.className = 'pinned-item';
+    item.textContent = `${entry.from}: ${entry.text}`;
+    pinnedMessagesList.appendChild(item);
+  });
+}
+
 function stopTyping() {
   if (typingTimer) {
     clearTimeout(typingTimer);
@@ -375,6 +460,96 @@ function resetComposer() {
   sendButton.textContent = 'Send';
   messageInput.value = '';
   messageInput.focus();
+}
+
+async function ensureMedia(type = 'audio') {
+  if (localStream) return localStream;
+  const constraints = type === 'video'
+    ? { audio: true, video: true }
+    : { audio: true, video: false };
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    if (localVideo) {
+      localVideo.srcObject = localStream;
+    }
+    return localStream;
+  } catch (error) {
+    setStatus('Microphone access is required for calls.');
+    throw error;
+  }
+}
+
+function closeCallUi() {
+  callOverlay.classList.add('hidden');
+  callState = { incoming: false, active: false, type: 'voice', caller: null, target: null };
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  if (localStream) {
+    localStream.getTracks().forEach((track) => track.stop());
+    localStream = null;
+  }
+  if (localVideo) localVideo.srcObject = null;
+  if (remoteVideo) remoteVideo.srcObject = null;
+}
+
+async function startCall(type = 'voice') {
+  const target = recipientSelect.value;
+  if (!target || target === 'All' || !currentUser) {
+    setStatus('Select a specific user to call.');
+    return;
+  }
+  try {
+    await ensureMedia(type === 'video' ? 'video' : 'audio');
+    callState = { incoming: false, active: false, type, caller: currentUser, target };
+    callStatus.textContent = `Calling ${target}...`;
+    callOverlay.classList.remove('hidden');
+    peerConnection = new RTCPeerConnection();
+    localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('call-candidate', { to: target, candidate: event.candidate });
+      }
+    };
+    peerConnection.ontrack = (event) => {
+      if (remoteVideo) {
+        remoteVideo.srcObject = event.streams[0];
+      }
+    };
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    socket.emit('call-offer', { to: target, offer, type });
+  } catch (error) {
+    closeCallUi();
+  }
+}
+
+async function answerCall() {
+  try {
+    await ensureMedia(callState.type === 'video' ? 'video' : 'audio');
+    peerConnection = new RTCPeerConnection();
+    localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('call-candidate', { to: callState.caller, candidate: event.candidate });
+      }
+    };
+    peerConnection.ontrack = (event) => {
+      if (remoteVideo) {
+        remoteVideo.srcObject = event.streams[0];
+      }
+    };
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(pendingOffer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    socket.emit('call-answer', { to: callState.caller, answer });
+    callState.active = true;
+    callStatus.textContent = `In call with ${callState.caller}`;
+    callOverlay.classList.remove('hidden');
+  } catch (error) {
+    closeCallUi();
+  }
 }
 
 loginForm.addEventListener('submit', (event) => {
@@ -535,6 +710,49 @@ lockRoomButton.addEventListener('click', () => {
   setStatus(`${currentRoom} lock toggled`);
 });
 
+muteUserButton.addEventListener('click', () => {
+  const target = prompt('User to mute:');
+  if (!target) return;
+  moderationState.muted.add(target.trim());
+  setStatus(`${target.trim()} muted.`);
+});
+
+banUserButton.addEventListener('click', () => {
+  const target = prompt('User to ban:');
+  if (!target) return;
+  moderationState.banned.add(target.trim());
+  setStatus(`${target.trim()} banned.`);
+});
+
+editProfileButton.addEventListener('click', () => {
+  const status = prompt('Set your status:', userProfiles.get(currentUser)?.status || 'Available');
+  const mood = prompt('Set your mood:', userProfiles.get(currentUser)?.mood || 'Chatting');
+  if (!currentUser) return;
+  const profile = { name: currentUser, status: status || 'Available', mood: mood || 'Chatting' };
+  userProfiles.set(currentUser, profile);
+  updateProfileCard();
+  setStatus('Profile updated.');
+});
+
+createPollButton.addEventListener('click', () => {
+  const question = prompt('Poll question:');
+  if (!question) return;
+  const options = prompt('Options (comma separated):');
+  if (!options) return;
+  const poll = { question, options: options.split(',').map((entry) => entry.trim()).filter(Boolean), votes: [] };
+  polls.set(`poll-${Date.now()}`, poll);
+  socket.emit('send-message', { text: `📊 Poll: ${question} | Options: ${poll.options.join(' | ')}`, to: recipientSelect.value });
+  setStatus('Poll shared.');
+});
+
+assistantButton.addEventListener('click', () => {
+  const promptText = prompt('Ask the assistant:');
+  if (!promptText) return;
+  const reply = `Assistant: I can help with that. You asked: ${promptText}`;
+  socket.emit('send-message', { text: reply, to: recipientSelect.value });
+  setStatus('Assistant suggestion sent.');
+});
+
 messageForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const text = messageInput.value.trim();
@@ -560,7 +778,44 @@ messageInput.addEventListener('input', () => {
 });
 messageInput.addEventListener('blur', stopTyping);
 
+voiceButton.addEventListener('click', async () => {
+  if (!mediaRecorder) {
+    setStatus('Microphone access is required to record voice notes.');
+    return;
+  }
+
+  if (!isRecording) {
+    recordedChunks = [];
+    mediaRecorder.start();
+    isRecording = true;
+    recordingIndicator.classList.remove('hidden');
+    voiceButton.textContent = 'Stop recording';
+    setStatus('Recording voice note...');
+  } else {
+    mediaRecorder.stop();
+  }
+});
+
+voiceCallButton.addEventListener('click', () => startCall('voice'));
+videoCallButton.addEventListener('click', () => startCall('video'));
+acceptCallButton.addEventListener('click', answerCall);
+declineCallButton.addEventListener('click', () => {
+  const peer = callState.caller || callState.target;
+  if (peer) {
+    socket.emit('call-decline', { to: peer });
+  }
+  closeCallUi();
+});
+hangupCallButton.addEventListener('click', () => {
+  const peer = callState.caller || callState.target;
+  if (peer) {
+    socket.emit('call-end', { to: peer });
+  }
+  closeCallUi();
+});
+
 socket.on('connect', () => {
+  requestBrowserNotifications();
   setStatus('Connected');
 });
 
@@ -568,6 +823,8 @@ socket.on('login-success', (username) => {
   currentUser = username;
   chatApp.classList.remove('hidden');
   loginOverlay.classList.add('hidden');
+  userProfiles.set(username, { name: username, status: 'Available', mood: 'Chatting' });
+  updateProfileCard();
   setStatus(`Logged in as ${username}`);
 });
 
@@ -636,6 +893,7 @@ socket.on('chat-message', (message) => {
     } else {
       playSound('message');
     }
+    showBrowserNotification(message);
   }
 });
 
@@ -679,6 +937,36 @@ socket.on('private-room-invite', (invite) => {
   setStatus(`Invite received for ${invite.room}`);
 });
 
+socket.on('call-offer', async ({ from, offer, type }) => {
+  callState = { incoming: true, active: false, type, caller: from, target: currentUser };
+  pendingOffer = offer;
+  callStatus.textContent = `${from} is calling you (${type === 'video' ? 'video' : 'voice'})`;
+  callOverlay.classList.remove('hidden');
+  setStatus(`Incoming ${type} call from ${from}`);
+});
+
+socket.on('call-answer', async ({ answer }) => {
+  if (!peerConnection) return;
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+  callState.active = true;
+  callStatus.textContent = `In call with ${callState.target}`;
+});
+
+socket.on('call-candidate', async ({ candidate }) => {
+  if (!peerConnection) return;
+  await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+});
+
+socket.on('call-decline', () => {
+  setStatus('Call declined.');
+  closeCallUi();
+});
+
+socket.on('call-end', () => {
+  setStatus('Call ended.');
+  closeCallUi();
+});
+
 socket.on('invite-success', ({ room }) => {
   setStatus(`Invite created for ${room}`);
 });
@@ -696,148 +984,6 @@ socket.on('invite-error', (message) => {
 });
 
 applyTheme(currentTheme);
-
-messageForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const text = messageInput.value.trim();
-  if (!text && !editingMessageId) return;
-  if (editingMessageId) {
-    socket.emit('edit-message', { id: editingMessageId, text });
-    editingMessageId = null;
-    sendButton.textContent = 'Send';
-  } else {
-    socket.emit('send-message', { text, to: recipientSelect.value });
-  }
-  stopTyping();
-  resetComposer();
-});
-
-voiceButton.addEventListener('click', async () => {
-  if (!mediaRecorder) {
-    setStatus('Microphone access is required to record voice notes.');
-    return;
-  }
-
-  if (!isRecording) {
-    recordedChunks = [];
-    mediaRecorder.start();
-    isRecording = true;
-    recordingIndicator.classList.remove('hidden');
-    voiceButton.textContent = 'Stop recording';
-    setStatus('Recording voice note...');
-  } else {
-    mediaRecorder.stop();
-  }
-});
-
-socket.on('connect', () => {
-  setStatus('Connected');
-});
-
-socket.on('disconnect', () => {
-  setStatus('Disconnected. Reload to reconnect.');
-});
-
-socket.on('login-error', (message) => {
-  loginError.textContent = message;
-});
-
-socket.on('register-error', (message) => {
-  loginError.textContent = message;
-});
-
-socket.on('register-success', (message) => {
-  loginError.textContent = message;
-  showLoginBtn.click();
-});
-
-socket.on('login-success', (name) => {
-  currentUser = name;
-  chatApp.classList.remove('hidden');
-  loginOverlay.classList.add('hidden');
-  currentRoomName.textContent = '(Lobby)';
-  setStatus(`Logged in as ${name}`);
-});
-
-socket.on('room-list', (rooms) => {
-  updateRooms(rooms);
-});
-
-socket.on('joined-room', ({ room, history }) => {
-  currentRoom = room;
-  currentRoomName.textContent = `(${room})`;
-  roomMessages.set(room, history || []);
-  markRoomRead(room);
-  renderMessages();
-  updateRooms(currentRooms);
-  recipientSelect.value = 'All';
-});
-
-socket.on('create-room-error', (message) => {
-  createRoomError.textContent = message;
-});
-
-socket.on('invite-error', (message) => {
-  setStatus(message);
-});
-
-socket.on('invite-success', ({ room }) => {
-  setStatus(`Invite created for ${room}`);
-});
-
-socket.on('private-room-invite', (invite) => {
-  pendingInvites.push(invite);
-  renderNotifications();
-  playSound('invite');
-  setStatus(`Invite received for ${invite.room}`);
-});
-
-socket.on('logged-out', () => {
-  currentUser = null;
-  currentRoom = 'Lobby';
-  roomMessages.clear();
-  editingMessageId = null;
-  activeTypingUsers = [];
-  unreadRooms.clear();
-  readReceipts.clear();
-  updateTypingIndicator();
-  messagesContainer.innerHTML = '';
-  chatApp.classList.add('hidden');
-  loginOverlay.classList.remove('hidden');
-  setStatus('Logged out');
-});
-
-socket.on('join-room-error', (message) => {
-  setStatus(message);
-});
-
-socket.on('user-list', (users) => {
-  updateUsers(users);
-});
-
-socket.on('chat-message', (message) => {
-  if (!roomMessages.has(message.room)) {
-    roomMessages.set(message.room, []);
-  }
-  const roomHistory = roomMessages.get(message.room);
-  if (!roomHistory.some((entry) => entry.id === message.id)) {
-    roomHistory.push(message);
-  }
-  if (message.room !== currentRoom) {
-    unreadRooms.add(message.room);
-    updateRooms(currentRooms);
-  }
-  if (message.room === currentRoom) {
-    renderMessages();
-  }
-  if (message.from !== currentUser) {
-    if (message.text && currentUser && message.text.includes(currentUser)) {
-      playSound('mention');
-    } else {
-      playSound('message');
-    }
-  }
-});
 
 async function setupMedia() {
   try {

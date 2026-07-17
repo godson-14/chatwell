@@ -61,6 +61,17 @@
         <h2>Room Admin</h2>
         <button id="clearRoomButton" class="voice-button secondary">Clear current room</button>
         <button id="lockRoomButton" class="voice-button secondary">Lock room</button>
+        <button id="muteUserButton" class="voice-button secondary">Mute user</button>
+        <button id="banUserButton" class="voice-button secondary">Ban user</button>
+      </div>
+
+      <div class="sidebar-section">
+        <h2>Community</h2>
+        <button id="editProfileButton" class="voice-button secondary" type="button">Edit profile</button>
+        <button id="createPollButton" class="voice-button secondary" type="button">Create poll</button>
+        <button id="assistantButton" class="voice-button secondary" type="button">Ask assistant</button>
+        <div id="profileCard" class="profile-card"></div>
+        <div id="pinnedMessagesList" class="pinned-list"></div>
       </div>
 
       <div class="sidebar-section">
@@ -81,6 +92,11 @@
     <section class="chat-panel">
       <header class="chat-header">
         <h2>Chat <span id="currentRoomName">(Lobby)</span></h2>
+        <div class="header-tags">
+          <span class="pill">Rooms</span>
+          <span class="pill">Polls</span>
+          <span class="pill">Assistant</span>
+        </div>
       </header>
       <div id="messages" class="messages"></div>
 
@@ -93,6 +109,8 @@
         <label class="tool-button" for="fileInput">📎</label>
         <input id="fileInput" type="file" hidden />
         <button id="soundToggle" type="button" class="tool-button" title="Mute sounds">🔊</button>
+        <button id="voiceCallButton" type="button" class="tool-button" title="Start voice call">📞</button>
+        <button id="videoCallButton" type="button" class="tool-button" title="Start video call">📹</button>
         <button id="themeToggle" type="button" class="tool-button">🌙</button>
       </div>
       <div id="emojiPicker" class="emoji-picker hidden">
@@ -107,6 +125,21 @@
       <div id="recordingIndicator" class="recording hidden">Recording... press again to stop</div>
     </section>
   </main>
+
+  <div id="callOverlay" class="call-overlay hidden">
+    <div class="call-panel">
+      <div id="callStatus" class="call-status">Call</div>
+      <div class="call-videos">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+      </div>
+      <div class="call-actions">
+        <button id="acceptCallButton" type="button">Answer</button>
+        <button id="declineCallButton" type="button">Decline</button>
+        <button id="hangupCallButton" type="button">Hang up</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://chatwell-rg2y.onrender.com/socket.io/socket.io.js"></script>
   <script>
