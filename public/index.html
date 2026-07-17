@@ -30,9 +30,13 @@
   </div>
 
   <main class="app hidden" id="chatApp">
-    <section class="sidebar">
+    <section class="sidebar" id="sidebar">
       <div class="sidebar-section">
-        <h2>Rooms</h2>
+        <div class="sidebar-header">
+          <h2>Rooms</h2>
+          <button id="mobileToggle" class="tool-button" type="button">☰</button>
+        </div>
+        <input id="searchInput" class="search-input" placeholder="Search messages" autocomplete="off" />
         <div id="roomsList" class="rooms-list"></div>
         <form id="createRoomForm" class="create-room-form">
           <input id="newRoomInput" placeholder="New room name" autocomplete="off" />
@@ -51,6 +55,12 @@
         <button id="logoutButton" class="voice-button">Logout</button>
         <button id="inviteButton" class="voice-button">Invite to private room</button>
         <button id="groupInviteButton" class="voice-button">Invite current room</button>
+      </div>
+
+      <div class="sidebar-section">
+        <h2>Room Admin</h2>
+        <button id="clearRoomButton" class="voice-button secondary">Clear current room</button>
+        <button id="lockRoomButton" class="voice-button secondary">Lock room</button>
       </div>
 
       <div class="sidebar-section">
@@ -76,8 +86,23 @@
 
       <form id="messageForm" class="message-form">
         <input id="messageInput" placeholder="Type a message" autocomplete="off" />
-        <button type="submit">Send</button>
+        <button id="sendButton" type="submit">Send</button>
       </form>
+      <div class="composer-tools">
+        <button id="emojiButton" type="button" class="tool-button">😀</button>
+        <label class="tool-button" for="fileInput">📎</label>
+        <input id="fileInput" type="file" hidden />
+        <button id="soundToggle" type="button" class="tool-button" title="Mute sounds">🔊</button>
+        <button id="themeToggle" type="button" class="tool-button">🌙</button>
+      </div>
+      <div id="emojiPicker" class="emoji-picker hidden">
+        <button type="button" data-emoji="👍">👍</button>
+        <button type="button" data-emoji="❤️">❤️</button>
+        <button type="button" data-emoji="😂">😂</button>
+        <button type="button" data-emoji="🔥">🔥</button>
+        <button type="button" data-emoji="🎉">🎉</button>
+      </div>
+      <div id="typingIndicator" class="typing-indicator"></div>
       <button id="voiceButton" class="voice-button">Record voice note</button>
       <div id="recordingIndicator" class="recording hidden">Recording... press again to stop</div>
     </section>

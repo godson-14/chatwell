@@ -13,6 +13,7 @@ const users = new Map();
 const userRooms = new Map();
 const roomMembers = new Map();
 const rooms = new Map();
+const typingUsers = new Map();
 const credentialsFile = path.join(__dirname, 'users.json');
 const historyFile = path.join(__dirname, 'chat-history.json');
 
@@ -26,6 +27,7 @@ function cleanupUser(name) {
     if (members) {
       members.delete(name);
       io.to(room).emit('user-list', getRoomUsers(room));
+      broadcastTyping(room);
     }
   }
 }
@@ -90,16 +92,40 @@ function ensureRoom(room) {
   if (!roomMembers.has(room)) {
     roomMembers.set(room, new Set());
   }
+  if (!typingUsers.has(room)) {
+    typingUsers.set(room, new Set());
+  }
 }
 
 function addRoomMessage(room, message) {
   ensureRoom(room);
   const history = rooms.get(room);
   history.push(message);
-  if (history.length > 250) {
+  if (history.length > 500) {
     history.shift();
   }
   saveHistory();
+}
+
+function updateRoomMessage(room, messageId, updater) {
+  ensureRoom(room);
+  const history = rooms.get(room);
+  const index = history.findIndex((message) => message.id === messageId);
+  if (index === -1) return null;
+  const updated = { ...history[index], ...updater };
+  history[index] = updated;
+  saveHistory();
+  return updated;
+}
+
+function removeRoomMessage(room, messageId) {
+  ensureRoom(room);
+  const history = rooms.get(room);
+  const next = history.filter((message) => message.id !== messageId);
+  if (next.length === history.length) return false;
+  rooms.set(room, next);
+  saveHistory();
+  return true;
 }
 
 function broadcastRooms() {
@@ -108,6 +134,12 @@ function broadcastRooms() {
 
 function getRoomUsers(room) {
   return Array.from(roomMembers.get(room) || []);
+}
+
+function broadcastTyping(room) {
+  ensureRoom(room);
+  const active = Array.from(typingUsers.get(room) || []);
+  io.to(room).emit('typing-update', { room, users: active });
 }
 
 function joinRoom(socket, username, room) {
@@ -131,12 +163,28 @@ function joinRoom(socket, username, room) {
   roomMembers.get(room).add(username);
   socket.emit('joined-room', { room, history: rooms.get(room) });
   io.to(room).emit('user-list', getRoomUsers(room));
+  broadcastTyping(room);
+}
+
+function createMessageBase(type, from, to, room, extra = {}) {
+  return {
+    id: crypto.randomBytes(8).toString('hex'),
+    type,
+    from,
+    to,
+    room,
+    time: new Date().toISOString(),
+    edited: false,
+    reactions: {},
+    ...extra,
+  };
 }
 
 const initialHistory = loadHistory();
 Object.entries(initialHistory).forEach(([room, history]) => {
   rooms.set(room, Array.isArray(history) ? history : []);
   roomMembers.set(room, new Set());
+  typingUsers.set(room, new Set());
 });
 ensureRoom('Lobby');
 saveHistory();
@@ -227,8 +275,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const onlineTargets = cleanTargets
-      .filter((target) => users.has(target));
+    const onlineTargets = cleanTargets.filter((target) => users.has(target));
 
     if (onlineTargets.length === 0) {
       socket.emit('invite-error', 'None of the invited users are online.');
@@ -302,17 +349,30 @@ io.on('connection', (socket) => {
     joinRoom(socket, username, cleanRoom);
   });
 
+  socket.on('typing', () => {
+    if (!username) return;
+    const room = userRooms.get(username) || 'Lobby';
+    const typingSet = typingUsers.get(room);
+    if (!typingSet) return;
+    typingSet.add(username);
+    broadcastTyping(room);
+  });
+
+  socket.on('stop-typing', () => {
+    if (!username) return;
+    const room = userRooms.get(username) || 'Lobby';
+    const typingSet = typingUsers.get(room);
+    if (!typingSet) return;
+    typingSet.delete(username);
+    broadcastTyping(room);
+  });
+
   socket.on('send-message', (data) => {
     if (!username) return;
     const room = userRooms.get(username) || 'Lobby';
-    const message = {
-      type: 'text',
-      from: username,
-      to: data.to || 'All',
-      room,
+    const message = createMessageBase('text', username, data.to || 'All', room, {
       text: String(data.text || '').trim(),
-      time: new Date().toISOString(),
-    };
+    });
     if (!message.text) return;
 
     if (message.to === 'All') {
@@ -325,20 +385,65 @@ io.on('connection', (socket) => {
         socket.emit('chat-message', message);
       }
     }
+
+    const typingSet = typingUsers.get(room);
+    if (typingSet) {
+      typingSet.delete(username);
+      broadcastTyping(room);
+    }
+  });
+
+  socket.on('send-file', (data) => {
+    if (!username) return;
+    const room = userRooms.get(username) || 'Lobby';
+    const payload = createMessageBase('file', username, data.to || 'All', room, {
+      fileName: String(data.fileName || 'attachment'),
+      fileData: data.fileData,
+      mimeType: data.mimeType || 'application/octet-stream',
+    });
+    if (!payload.fileData) return;
+
+    if (payload.to === 'All') {
+      addRoomMessage(room, payload);
+      io.to(room).emit('chat-message', payload);
+    } else {
+      const targetId = users.get(payload.to);
+      if (targetId) {
+        io.to(targetId).emit('chat-message', payload);
+        socket.emit('chat-message', payload);
+      }
+    }
+  });
+
+  socket.on('send-image', (data) => {
+    if (!username) return;
+    const room = userRooms.get(username) || 'Lobby';
+    const payload = createMessageBase('image', username, data.to || 'All', room, {
+      imageName: String(data.fileName || 'image'),
+      imageData: data.fileData,
+      mimeType: data.mimeType || 'image/png',
+    });
+    if (!payload.imageData) return;
+
+    if (payload.to === 'All') {
+      addRoomMessage(room, payload);
+      io.to(room).emit('chat-message', payload);
+    } else {
+      const targetId = users.get(payload.to);
+      if (targetId) {
+        io.to(targetId).emit('chat-message', payload);
+        socket.emit('chat-message', payload);
+      }
+    }
   });
 
   socket.on('send-voice', (data) => {
     if (!username) return;
     const room = userRooms.get(username) || 'Lobby';
-    const payload = {
-      type: 'voice',
-      from: username,
-      to: data.to || 'All',
-      room,
+    const payload = createMessageBase('voice', username, data.to || 'All', room, {
       audioData: data.audioData,
       audioType: data.audioType || 'audio/webm',
-      time: new Date().toISOString(),
-    };
+    });
     if (!payload.audioData) return;
 
     if (payload.to === 'All') {
@@ -351,6 +456,70 @@ io.on('connection', (socket) => {
         socket.emit('chat-message', payload);
       }
     }
+  });
+
+  socket.on('edit-message', ({ id, text }) => {
+    if (!username) return;
+    const room = userRooms.get(username) || 'Lobby';
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return;
+    const updated = updateRoomMessage(room, id, {
+      text: cleanText,
+      edited: true,
+      editedAt: new Date().toISOString(),
+    });
+    if (updated) {
+      io.to(room).emit('message-updated', { room, message: updated });
+    }
+  });
+
+  socket.on('delete-message', ({ id }) => {
+    if (!username) return;
+    const room = userRooms.get(username) || 'Lobby';
+    const message = rooms.get(room)?.find((entry) => entry.id === id);
+    if (!message || message.from !== username) return;
+    const removed = removeRoomMessage(room, id);
+    if (removed) {
+      io.to(room).emit('message-deleted', { room, id });
+    }
+  });
+
+  socket.on('toggle-reaction', ({ id, emoji }) => {
+    if (!username) return;
+    const room = userRooms.get(username) || 'Lobby';
+    const message = rooms.get(room)?.find((entry) => entry.id === id);
+    if (!message) return;
+    const reactions = { ...(message.reactions || {}) };
+    const currentUsers = Array.isArray(reactions[emoji]) ? reactions[emoji] : [];
+    const nextUsers = currentUsers.includes(username)
+      ? currentUsers.filter((entry) => entry !== username)
+      : [...currentUsers, username];
+    reactions[emoji] = nextUsers;
+    const updated = updateRoomMessage(room, id, { reactions });
+    if (updated) {
+      io.to(room).emit('message-updated', { room, message: updated });
+    }
+  });
+
+  socket.on('clear-room', (roomName) => {
+    if (!username) return;
+    const room = String(roomName || '').trim();
+    if (!room || !rooms.has(room)) return;
+    rooms.set(room, []);
+    saveHistory();
+    io.to(room).emit('room-cleared', { room });
+  });
+
+  socket.on('lock-room', (roomName) => {
+    if (!username) return;
+    const room = String(roomName || '').trim();
+    if (!room || !rooms.has(room)) return;
+    const current = rooms.get(room);
+    const locked = current?.locked;
+    const next = { ...current, locked: !locked };
+    rooms.set(room, next);
+    saveHistory();
+    io.to(room).emit('room-locked', { room, locked: !locked });
   });
 
   socket.on('logout', () => {
