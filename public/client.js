@@ -87,6 +87,7 @@ let peerConnection = null;
 let localStream = null;
 let callState = { incoming: false, active: false, type: 'voice', caller: null, target: null };
 let pendingOffer = null;
+let pendingCandidates = [];
 
 function setStatus(text) {
   statusBox.textContent = text;
@@ -482,6 +483,8 @@ async function ensureMedia(type = 'audio') {
 function closeCallUi() {
   callOverlay.classList.add('hidden');
   callState = { incoming: false, active: false, type: 'voice', caller: null, target: null };
+  pendingOffer = null;
+  pendingCandidates = [];
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
@@ -492,6 +495,19 @@ function closeCallUi() {
   }
   if (localVideo) localVideo.srcObject = null;
   if (remoteVideo) remoteVideo.srcObject = null;
+}
+
+function flushPendingCandidates() {
+  if (!peerConnection || !pendingCandidates.length) return;
+  const buffered = pendingCandidates.slice();
+  pendingCandidates = [];
+  buffered.forEach(async (candidate) => {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      // Ignore candidate races while the handshake is still pending.
+    }
+  });
 }
 
 async function startCall(type = 'voice') {
@@ -510,6 +526,12 @@ async function startCall(type = 'voice') {
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit('call-candidate', { to: target, candidate: event.candidate });
+      }
+    };
+    peerConnection.onconnectionstatechange = () => {
+      if (peerConnection.connectionState === 'connected' || peerConnection.connectionState === 'completed') {
+        callState.active = true;
+        callStatus.textContent = `Connected with ${target}`;
       }
     };
     peerConnection.ontrack = (event) => {
@@ -535,6 +557,12 @@ async function answerCall() {
         socket.emit('call-candidate', { to: callState.caller, candidate: event.candidate });
       }
     };
+    peerConnection.onconnectionstatechange = () => {
+      if (peerConnection.connectionState === 'connected' || peerConnection.connectionState === 'completed') {
+        callState.active = true;
+        callStatus.textContent = `Connected with ${callState.caller}`;
+      }
+    };
     peerConnection.ontrack = (event) => {
       if (remoteVideo) {
         remoteVideo.srcObject = event.streams[0];
@@ -544,6 +572,7 @@ async function answerCall() {
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     socket.emit('call-answer', { to: callState.caller, answer });
+    flushPendingCandidates();
     callState.active = true;
     callStatus.textContent = `In call with ${callState.caller}`;
     callOverlay.classList.remove('hidden');
@@ -948,13 +977,21 @@ socket.on('call-offer', async ({ from, offer, type }) => {
 socket.on('call-answer', async ({ answer }) => {
   if (!peerConnection) return;
   await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+  flushPendingCandidates();
   callState.active = true;
   callStatus.textContent = `In call with ${callState.target}`;
 });
 
 socket.on('call-candidate', async ({ candidate }) => {
-  if (!peerConnection) return;
-  await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+  if (!peerConnection) {
+    pendingCandidates.push(candidate);
+    return;
+  }
+  try {
+    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+  } catch (error) {
+    pendingCandidates.push(candidate);
+  }
 });
 
 socket.on('call-decline', () => {
