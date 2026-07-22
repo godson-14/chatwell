@@ -1,5 +1,16 @@
 Deploy notes — Chat App
 
+Database setup
+- The app uses the CockroachDB database named `chat well` through `DATABASE_URL`.
+- The schema is created in DB Code and the server also verifies it during startup.
+- Configure `DATABASE_URL` in the deployment service. Do not commit the connection string.
+- Optional: set `DATABASE_SSL=false` only for a local non-TLS database.
+
+DB Code connection
+- In VS Code DB Code, use the `Ifechi-CockroachDB` connection and database `chat well`.
+- Tables: `users`, `rooms`, `messages`, and `room_members`.
+- Existing `users.json` and `chat-history.json` records are imported on first startup with conflict-safe inserts.
+
 Problem
 - Vercel serverless functions are not suitable for long-lived socket servers (Socket.IO). Attempting to run `server.js` as a Vercel Serverless Function will crash or time out.
 
