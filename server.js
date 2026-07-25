@@ -5,7 +5,7 @@ const { Pool } = require('pg');
 const path = require('path');
 const crypto = require('crypto');
 const { Server } = require('socket.io');
-const { Kafka } = require('kafkajs'); // Added KafkaJS library
+const { Kafka } = require('kafkajs');
 
 const app = express();
 const server = http.createServer(app);
@@ -19,7 +19,7 @@ const kafka = new Kafka({
     rejectUnauthorized: true,
     ca: [fs.readFileSync(path.join(__dirname, 'ca.pem'), 'utf-8')],
     key: fs.readFileSync(path.join(__dirname, 'service.key'), 'utf-8'),
-    cert: fs.readFileSync(path.join(__dirname, 'service.cert'), 'utf-8'),
+    cert: fs.readFileSync(path.join(__dirname, 'service.cert.txt'), 'utf-8'), // Updated to match your exact file extension
   },
 });
 
@@ -33,7 +33,7 @@ async function connectKafka() {
     console.error('Kafka Connection Error:', err);
   }
 }
-connectKafka(); // Establish the Kafka connection instantly at startup
+connectKafka();
 // ----------------------------------
 
 const users = new Map();
@@ -76,7 +76,7 @@ async function createAccount(name, password) {
 
 async function verifyAccount(name, password) {
   const result = await pool.query('SELECT salt, password_hash FROM users WHERE username = $1', [name]);
-  const record = result.rows[0];
+  const record = result.rows;
   if (!record) return false;
   const candidate = hashPassword(password, record.salt);
   return crypto.timingSafeEqual(Buffer.from(candidate, 'hex'), Buffer.from(record.password_hash, 'hex'));
@@ -113,7 +113,6 @@ async function addRoomMessage(room, message) {
   await pool.query(`INSERT INTO messages (id, room_name, message_type, from_user, to_user, sent_at, edited, text, file_name, file_data, mime_type, image_name, image_data, audio_data, audio_type, reactions)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb)`, messageToRow(message));
   
-  // Optional: Automatically stream new database messages out to a Kafka Topic
   try {
     await producer.send({
       topic: 'chat-messages',
@@ -233,7 +232,7 @@ async function initializeDatabase() {
   });
   messageResult.rows.forEach((row) => {
     ensureRoom(row.room_name);
-    rooms.get(row.room_name).push(rowToMessage(row));
+    rooms.get(row.row_name).push(rowToMessage(row));
   });
 }
 
@@ -242,16 +241,12 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Initialize database data structures
 initializeDatabase().catch(console.error);
 
 io.on('connection', (socket) => {
   let username = null;
-  
-  // Paste your remaining socket events (register, login, send-message, disconnect, etc.) right below here
 });
 
-// Explicitly bind the node http server to listen to incoming network traffic
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Chat application running on port ${PORT}`);
