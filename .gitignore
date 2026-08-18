@@ -1,0 +1,19 @@
+# Environment / secrets (contains your CockroachDB connection string)
+.env
+examhub.env
+*.env
+
+# Node
+node_modules/
+npm-debug.log*
+*.log
+
+# Temp / runtime
+server-pid.txt
+server-out.log
+server-err.log
+db-test.txt
+
+# OS
+.DS_Store
+Thumbs.db
