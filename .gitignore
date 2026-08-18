@@ -1,8 +1,3 @@
-# Environment / secrets (contains your CockroachDB connection string)
-.env
-examhub.env
-*.env
-
 # Node
 node_modules/
 npm-debug.log*
